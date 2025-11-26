@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>World Clocks — Digital Timezones</title>
+  <style>
+    :root{
+      --bg:#0b0b0b;
+      --card:#121212;
+      --primary:#d32f2f;
+      --muted:#9aa0a3;
+      --text:#f6f4f4;
+      --glass: rgba(255,255,255,0.03);
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family:Inter,system-ui,Segoe UI,Roboto,"Helvetica Neue",Arial;
+      background:linear-gradient(180deg,var(--bg),#070707);
+      color:var(--text);
+      min-height:100vh;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:24px;
+    }
+    .app{
+      width:100%;
+      max-width:980px;
+      background:linear-gradient(180deg,var(--card),#0e0e0e);
+      border:1px solid rgba(255,255,255,0.03);
+      border-radius:12px;
+      padding:18px;
+      box-shadow:0 8px 30px rgba(0,0,0,0.6);
+    }
+    header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+    h1{margin:0;font-size:1.1rem;color:var(--primary)}
+    .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    select,input[type="search"]{
+      background:#0b0b0b;border:1px solid var(--glass);color:var(--text);padding:8px;border-radius:8px;
+    }
+    button{
+      background:var(--primary);border:none;color:#fff;padding:8px 12px;border-radius:8px;cursor:pointer;
+    }
+    button.ghost{background:transparent;border:1px solid rgba(255,255,255,0.05);color:var(--text)}
+    main{margin-top:16px}
+    .grid{
+      display:grid;
+      grid-template-columns: repeat(auto-fit,minmax(220px,1fr));
+      gap:12px;
+    }
+    .clock{
+      background:linear-gradient(180deg, rgba(255,255,255,0.01), rgba(0,0,0,0.15));
+      border-radius:10px;padding:12px;border:1px solid rgba(255,255,255,0.02);
+      display:flex;flex-direction:column;gap:8px;align-items:flex-start;
+    }
+    .tz-title{display:flex;align-items:center;gap:8px;width:100%;justify-content:space-between}
+    .tz-name{font-weight:600}
+    .time{font-family: "SFMono-Regular",ui-monospace,SFMono,Menlo,Monaco,monospace;font-size:1.6rem}
+    .sub{color:var(--muted);font-size:0.9rem}
+    .small{font-size:0.85rem;color:var(--muted)}
+    .actions{display:flex;gap:6px}
+    .empty{padding:24px;border-radius:8px;text-align:center;color:var(--muted);background:transparent;border:1px dashed rgba(255,255,255,0.02)}
+    footer{margin-top:14px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+    .badgelocal{background:rgba(255,255,255,0.03);padding:6px 10px;border-radius:8px;font-size:0.9rem;color:var(--muted)}
+    .controls .searchwrap{display:flex;gap:8px;align-items:center}
+    .tz-meta{display:flex;gap:8px;align-items:center}
+    .chip{background:rgba(255,255,255,0.02);padding:6px 8px;border-radius:999px;color:var(--muted);font-size:0.85rem}
+    @media (max-width:520px){
+      .time{font-size:1.2rem}
+      header{flex-direction:column;align-items:flex-start;gap:12px}
+    }
+  </style>
+</head>
+<body>
+  <div class="app" id="app">
+    <header>
+      <div>
+        <h1>World Clocks — RunFider</h1>
+        <div class="small">Digital clock showing current time across selected time zones</div>
+      </div>
+
+      <div class="controls" aria-hidden="false">
+        <div class="searchwrap">
+          <input id="tzSearch" type="search" placeholder="Search timezones (e.g. Europe, America, Asia)" />
+          <select id="tzSelect" aria-label="Time zone select" title="Choose a timezone">
+            <!-- JS will fill options -->
+          </select>
+        </div>
+        <button id="addTz">Add</button>
+        <button class="ghost" id="clearAll">Clear</button>
+      </div>
+    </header>
+
+    <main>
+      <div class="grid" id="clocksArea">
+        <!-- clocks inserted here -->
+      </div>
+
+      <div id="empty" class="empty" style="display:none;margin-top:12px">
+        No timezones selected. Use the selector above to add zones (your local timezone is added by default).
+      </div>
+    </main>
+
+    <footer>
+      <div class="badgelocal">Local: <span id="localTz"></span></div>
+      <div class="tz-meta">
+        <span class="chip" id="timeMode">24h</span>
+        <button class="ghost" id="toggle24">Toggle 24/12</button>
+        <button class="ghost" id="sortBtn">Sort by name</button>
+      </div>
+    </footer>
+  </div>
+
+  <script>
+  (function(){
+    // List of common IANA time zones (reasonable sample). You can expand this list.
+    const ZONES = [
+      "UTC",
+      "Europe/London", "Europe/Paris", "Europe/Berlin", "Europe/Madrid",
+      "Europe/Moscow",
+      "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles",
+      "America/Sao_Paulo", "America/Bogota", "America/Mexico_City",
+      "Asia/Tokyo", "Asia/Seoul", "Asia/Shanghai", "Asia/Kolkata", "Asia/Dubai",
+      "Australia/Sydney",
+      "Africa/Johannesburg",
+      "Pacific/Auckland",
+      "Atlantic/Azores"
+    ];
+
+    // Utilities
+    function el(q){ return document.querySelector(q); }
+    function create(tag, cls){ const n = document.createElement(tag); if (cls) n.className = cls; return n; }
+    const tzSelect = el('#tzSelect');
+    const tzSearch = el('#tzSearch');
+    const addTzBtn = el('#addTz');
+    const clocksArea = el('#clocksArea');
+    const empty = el('#empty');
+    const localTzElem = el('#localTz');
+    const toggle24 = el('#toggle24');
+    const timeModeChip = el('#timeMode');
+    const clearAll = el('#clearAll');
+    const sortBtn = el('#sortBtn');
+
+    // persisted zones in localStorage
+    const LS_KEY = 'wf_timezones_v1';
+    let selectedZones = JSON.parse(localStorage.getItem(LS_KEY) || "[]");
+
+    // default local timezone
+    const localTZ = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    localTzElem.textContent = localTZ;
+
+    // UI Helpers
+    function populateSelect(filter){
+      tzSelect.innerHTML = '';
+      const list = (filter ? ZONES.filter(z=>z.toLowerCase().includes(filter.toLowerCase())) : ZONES);
+      list.forEach(z => {
+        const opt = document.createElement('option');
+        opt.value = z;
+        opt.textContent = z;
+        tzSelect.appendChild(opt);
+      });
+    }
+
+    // Formatters
+    function formatTimeForZone(date, tz, use24){
+      // produce HH:MM:SS and AM/PM when 12h
+      const ops = { timeZone: tz, hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: !use24 };
+      return new Intl.DateTimeFormat(undefined, ops).format(date);
+    }
+    function formatDateForZone(date, tz){
+      const ops = { timeZone: tz, weekday:'short', year:'numeric', month:'short', day:'numeric' };
+      return new Intl.DateTimeFormat(undefined, ops).format(date);
+    }
+
+    // Create clock card
+    function makeClockCard(tz){
+      const card = create('div','clock');
+      card.dataset.tz = tz;
+
+      const top = create('div','tz-title');
+      const left = create('div');
+      const name = create('div','tz-name');
+      name.textContent = tz;
+      const sub = create('div','sub');
+      sub.textContent = ''; // will set below
+      left.appendChild(name);
+      left.appendChild(sub);
+
+      const right = create('div');
+      const actions = create('div','actions');
+      const removeBtn = create('button','ghost');
+      removeBtn.textContent = 'Remove';
+      removeBtn.style.background='transparent';
+      removeBtn.onclick = () => { removeZone(tz); };
+      const jumpBtn = create('button');
+      jumpBtn.textContent = 'Now';
+      jumpBtn.onclick = ()=> { focusOn(tz); };
+      actions.appendChild(jumpBtn);
+      actions.appendChild(removeBtn);
+      right.appendChild(actions);
+
+      top.appendChild(left);
+      top.appendChild(right);
+
+      const timeEl = create('div','time');
+      timeEl.textContent = '';
+
+      const meta = create('div','tz-meta');
+      const offset = create('div','small');
+      const dateEl = create('div','small');
+      meta.appendChild(dateEl);
+      meta.appendChild(offset);
+
+      card.appendChild(top);
+      card.appendChild(timeEl);
+      card.appendChild(meta);
+
+      // store refs
+      card._refs = { timeEl, dateEl, offsetEl: offset, sub };
+
+      return card;
+    }
+
+    // Update all clocks
+    let use24 = !!JSON.parse(localStorage.getItem('wf_24h') || "true");
+
+    function updateClocks(){
+      const now = new Date();
+      const cards = Array.from(clocksArea.children);
+      cards.forEach(card=>{
+        const tz = card.dataset.tz;
+        const {timeEl,dateEl,offsetEl,sub} = card._refs;
+        timeEl.textContent = formatTimeForZone(now, tz, use24);
+        dateEl.textContent = formatDateForZone(now, tz);
+
+        // compute offset from UTC in hours/minutes
+        try {
+          const fmtUTC = new Intl.DateTimeFormat('en-US',{timeZone:'UTC', hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit'});
+          const fmtTz = new Intl.DateTimeFormat('en-US',{timeZone:tz, hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit'});
+          const u = fmtUTC.formatToParts(now).find(p=>p.type==='hour').value;
+          const ut = fmtUTC.format(now);
+          const tzParts = fmtTz.formatToParts(now);
+          const hh = parseInt(tzParts.find(p=>p.type==='hour').value,10);
+          const mm = parseInt(tzParts.find(p=>p.type==='minute').value,10);
+          // Create comparable times using Date with timezone offset: approximate using getTimezoneOffset trick
+          // Simpler: use difference between Date in timezone vs UTC by constructing epoch strings is complex;
+          // Instead use Intl to get offset string via toLocaleString with timeZoneName option:
+          const tzOffsetStr = new Intl.DateTimeFormat('en-US',{timeZone:tz,timeZoneName:'shortOffset'}).format(now);
+          // fallback: show TZ short name if available
+          offsetEl.textContent = tzOffsetStr;
+        } catch(e){
+          offsetEl.textContent = '';
+        }
+
+        // Show extra info (local vs zone)
+        sub.textContent = tz === localTZ ? 'Local timezone' : '';
+      });
+    }
+
+    // Add/Remove Zones + persistence
+    function addZone(tz){
+      if (!tz) return;
+      if (selectedZones.includes(tz)) return;
+      selectedZones.push(tz);
+      persist();
+      renderClocks();
+    }
+    function removeZone(tz){
+      selectedZones = selectedZones.filter(x=>x!==tz);
+      persist();
+      renderClocks();
+    }
+    function persist(){
+      localStorage.setItem(LS_KEY, JSON.stringify(selectedZones));
+    }
+
+    // Render clocks area
+    function renderClocks(){
+      clocksArea.innerHTML = '';
+      const zones = selectedZones.slice();
+      if (!zones.length){
+        empty.style.display = 'block';
+      } else {
+        empty.style.display = 'none';
+        zones.forEach(tz=>{
+          const card = makeClockCard(tz);
+          clocksArea.appendChild(card);
+        });
+        updateClocks();
+      }
+    }
+
+    // Focus on a tz by alerting current datetime (small UX helper)
+    function focusOn(tz){
+      const now = new Date();
+      alert(`${tz}\n${formatDateForZone(now,tz)}\n${formatTimeForZone(now,tz,use24)}`);
+    }
+
+    // Load initial list: ensure localTZ is present
+    if (!selectedZones.includes(localTZ)) {
+      selectedZones.unshift(localTZ);
+    }
+    // remove duplicates
+    selectedZones = Array.from(new Set(selectedZones));
+
+    // Populate select on load
+    populateSelect('');
+    tzSearch.addEventListener('input', ()=> populateSelect(tzSearch.value));
+
+    // Add button
+    addTzBtn.addEventListener('click', ()=>{
+      const tz = tzSelect.value;
+      addZone(tz);
+    });
+    // allow Enter in search to add the top option
+    tzSearch.addEventListener('keydown', (ev)=>{
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        const opt = tzSelect.value;
+        if (opt) addZone(opt);
+      }
+    });
+
+    // Toggle 24/12
+    toggle24.addEventListener('click', ()=>{
+      use24 = !use24;
+      localStorage.setItem('wf_24h', JSON.stringify(use24));
+      timeModeChip.textContent = use24 ? '24h' : '12h';
+      updateClocks();
+    });
+    timeModeChip.textContent = use24 ? '24h' : '12h';
+
+    // Clear all except local
+    clearAll.addEventListener('click', ()=>{
+      if (!confirm('Clear all zones (except local)?')) return;
+      selectedZones = [localTZ];
+      persist();
+      renderClocks();
+    });
+
+    // Sort by name
+    let sortBy = 'name';
+    sortBtn.addEventListener('click', ()=>{
+      if (sortBy === 'name') {
+        selectedZones.sort();
+        sortBy = 'name';
+      } else {
+        // default insertion order kept
+      }
+      renderClocks();
+    });
+
+    // Initialize rendering and updater
+    renderClocks();
+    updateClocks();
+    setInterval(updateClocks, 1000);
+
+    // Drag & drop optional: allow reorder via drag if desired (not implemented to keep simple)
+    // Accessibility: keyboard navigation is native; remove buttons accessible.
+
+    // Expose a few helpers to console
+    window.__worldClocks = { addZone, removeZone, selectedZones };
+
+  })();
+  </script>
+</body>
+</html>
